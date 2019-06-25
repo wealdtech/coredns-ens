@@ -2,7 +2,9 @@
 
 onexit() {
   cd ${SRCDIR}
-  rm -r ${BUILDDIR}
+  chmod -R 755 ${BUILDDIR}/coredns/.git/objects/pack 2>/dev/null
+  rm -r ${BUILDDIR} 2>/dev/null
+  exit 1
 }
 trap onexit SIGHUP SIGINT SIGTERM
 
@@ -20,7 +22,7 @@ sed -i -e 's/CGO_ENABLED:=0/CGO_ENABLED:=1/' Makefile
 make
 cp coredns ${SRCDIR}
 cd ${SRCDIR}
-rm -rf ${BUILDDIR}/coredns/.git/objects/pack
+chmod -R 755 ${BUILDDIR}/coredns/.git/objects/pack
 rm -r ${BUILDDIR}
 
 if [ ! -z "$DOCKERGROUP" ] ; then
