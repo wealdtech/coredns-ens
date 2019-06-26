@@ -102,8 +102,5 @@ func ensParse(c *caddy.Controller) (string, string, []string, []string, error) {
 	if connection == "" {
 		return "", "", nil, nil, c.Errf("no connection")
 	}
-	if root == "" {
-		return "", "", nil, nil, c.Errf("no root")
-	}
 	return connection, root, ipfsGatewayAs, ipfsGatewayAAAAs, nil
 }

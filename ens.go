@@ -53,15 +53,17 @@ func (e ENS) Query(domain string, name string, qtype uint16, do bool) ([]dns.RR,
 
 	// Hard-coding some items for now; these should be removed if the relevant
 	// domain's records are present on-chain
-	if ensDomain == "" {
-		return results, nil
-	}
-	if ensDomain == e.Root {
+	if ensDomain == "" || ensDomain == e.Root {
 		return results, nil
 	}
 
-	ethRoot := fmt.Sprintf("eth.%s", e.Root)
-	if strings.HasSuffix(ensDomain, ethRoot) && strings.HasSuffix(name, fmt.Sprintf("%s.", e.Root)) {
+	var ethRoot string
+	if e.Root == "" {
+		ethRoot = "eth"
+	} else {
+		ethRoot = fmt.Sprintf("eth.%s", e.Root)
+	}
+	if ethRoot == "eth" || (strings.HasSuffix(ensDomain, ethRoot) && strings.HasSuffix(name, fmt.Sprintf("%s.", e.Root))) {
 		// This is a link request, using a secondary domain (e.g. eth.link) to redirect to .eth domains.
 		// Map to a .eth domain and provide relevant information
 		switch qtype {
@@ -109,7 +111,7 @@ func (e ENS) Query(domain string, name string, qtype uint16, do bool) ([]dns.RR,
 			}
 
 			// Fetch content hash
-			ethDomain := strings.TrimSuffix(name, fmt.Sprintf(".%s.", e.Root))
+			ethDomain := e.linkToEth(name)
 			resolver, err := ens.NewResolver(e.Client, ethDomain)
 			if err != nil {
 				log.Warnf("error obtaining resolver: %v", err)
@@ -294,7 +296,7 @@ func (e ENS) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (in
 }
 
 func (e ENS) obtainARRSet(name string, domain string) ([]byte, error) {
-	ethDomain := strings.TrimSuffix(name, fmt.Sprintf(".%s.", e.Root))
+	ethDomain := e.linkToEth(name)
 	resolver, err := ens.NewDNSResolver(e.Client, ethDomain)
 	if err != nil {
 		if err.Error() == "no contract code at given address" ||
@@ -309,7 +311,7 @@ func (e ENS) obtainARRSet(name string, domain string) ([]byte, error) {
 }
 
 func (e ENS) obtainAAAARRSet(name string, domain string) ([]byte, error) {
-	ethDomain := strings.TrimSuffix(name, fmt.Sprintf(".%s.", e.Root))
+	ethDomain := e.linkToEth(name)
 	resolver, err := ens.NewDNSResolver(e.Client, ethDomain)
 	if err != nil {
 		if err.Error() == "no contract code at given address" ||
@@ -324,7 +326,7 @@ func (e ENS) obtainAAAARRSet(name string, domain string) ([]byte, error) {
 }
 
 func (e ENS) obtainContenthash(name string, domain string) ([]byte, error) {
-	ethDomain := strings.TrimSuffix(name, fmt.Sprintf(".%s.", e.Root))
+	ethDomain := e.linkToEth(name)
 	resolver, err := ens.NewResolver(e.Client, ethDomain)
 	if err != nil {
 		if err.Error() == "no contract code at given address" ||
@@ -339,7 +341,7 @@ func (e ENS) obtainContenthash(name string, domain string) ([]byte, error) {
 }
 
 func (e ENS) obtainTXTRRSet(name string, domain string) ([]byte, error) {
-	ethDomain := strings.TrimSuffix(name, fmt.Sprintf(".%s.", e.Root))
+	ethDomain := e.linkToEth(name)
 	resolver, err := ens.NewDNSResolver(e.Client, ethDomain)
 	if err != nil {
 		if err.Error() == "no contract code at given address" ||
@@ -355,3 +357,12 @@ func (e ENS) obtainTXTRRSet(name string, domain string) ([]byte, error) {
 
 // Name implements the Handler interface.
 func (e ENS) Name() string { return "ens" }
+
+// linkToEth obtains the .eth domain from the DNS domain
+func (e ENS) linkToEth(domain string) string {
+	ethDomain := strings.TrimSuffix(domain, ".")
+	if e.Root != "" {
+		ethDomain = strings.TrimSuffix(ethDomain, fmt.Sprintf(".%s", e.Root))
+	}
+	return ethDomain
+}

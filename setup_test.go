@@ -154,16 +154,6 @@ func TestENSParse(t *testing.T) {
 			nil,
 			nil,
 		},
-		{ // 13
-			"",
-			`ens {
-			  connection http://localhost:8545/
-			}`,
-			"Testfile:3 - Error during parsing: no root",
-			"",
-			nil,
-			nil,
-		},
 	}
 
 	for i, test := range tests {
