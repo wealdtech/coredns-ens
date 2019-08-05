@@ -3,7 +3,7 @@ package ens
 import (
 	"testing"
 
-	"github.com/mholt/caddy"
+	"github.com/caddyserver/caddy"
 )
 
 func TestENSParse(t *testing.T) {
@@ -16,7 +16,7 @@ func TestENSParse(t *testing.T) {
 		ipfsgatewayaaaas []string
 	}{
 		{ // 0
-			".eth.link",
+			".",
 			`ens {
 			}`,
 			"Testfile:2 - Error during parsing: no connection",
@@ -25,7 +25,7 @@ func TestENSParse(t *testing.T) {
 			nil,
 		},
 		{ // 1
-			".eth.link",
+			".",
 			`ens {
 			   connection
 			}`,
@@ -45,7 +45,7 @@ func TestENSParse(t *testing.T) {
 			nil,
 		},
 		{ // 3
-			".eth.link",
+			".",
 			`ens {
 			  connection http://localhost:8545/
 			}`,
@@ -55,7 +55,7 @@ func TestENSParse(t *testing.T) {
 			nil,
 		},
 		{ // 4
-			".eth.link",
+			".",
 			`ens {
 			  connection http://localhost:8545/
 			  ipfsgatewaya
@@ -66,7 +66,7 @@ func TestENSParse(t *testing.T) {
 			nil,
 		},
 		{ // 5
-			".eth.link",
+			".",
 			`ens {
 			  connection http://localhost:8545/
 			  ipfsgatewaya 193.62.81.1
@@ -77,7 +77,7 @@ func TestENSParse(t *testing.T) {
 			nil,
 		},
 		{ // 6
-			".eth.link",
+			".",
 			`ens {
 			  connection http://localhost:8545/
 			  ipfsgatewayaaaa
@@ -88,7 +88,7 @@ func TestENSParse(t *testing.T) {
 			nil,
 		},
 		{ // 7
-			".eth.link",
+			".",
 			`ens {
 			  connection http://localhost:8545/
 			  ipfsgatewayaaaa fe80::b8fb:325d:fb5a:40e7
@@ -99,7 +99,7 @@ func TestENSParse(t *testing.T) {
 			[]string{"fe80::b8fb:325d:fb5a:40e7"},
 		},
 		{ // 8
-			"tls://eth.link:8053",
+			"tls://.:8053",
 			`ens {
 			  connection http://localhost:8545/
 			  ipfsgatewayaaaa fe80::b8fb:325d:fb5a:40e7
@@ -110,7 +110,7 @@ func TestENSParse(t *testing.T) {
 			[]string{"fe80::b8fb:325d:fb5a:40e7"},
 		},
 		{ // 9
-			"eth.link:8053",
+			".:8053",
 			`ens {
 			  connection http://localhost:8545/ bad
 			  ipfsgatewayaaaa fe80::b8fb:325d:fb5a:40e7
@@ -121,7 +121,7 @@ func TestENSParse(t *testing.T) {
 			nil,
 		},
 		{ // 10
-			"eth.link:8053",
+			".:8053",
 			`ens {
 			  connection http://localhost:8545/
 			  ipfsgatewaya 193.62.81.1 193.62.81.2
@@ -132,7 +132,7 @@ func TestENSParse(t *testing.T) {
 			nil,
 		},
 		{ // 11
-			"eth.link:8053",
+			".:8053",
 			`ens {
 			  connection http://localhost:8545/
 			  ipfsgatewayaaaa fe80::b8fb:325d:fb5a:40e7 fe80::b8fb:325d:fb5a:40e8
@@ -143,13 +143,49 @@ func TestENSParse(t *testing.T) {
 			[]string{"fe80::b8fb:325d:fb5a:40e7", "fe80::b8fb:325d:fb5a:40e8"},
 		},
 		{ // 12
-			"eth.link:8053",
+			".:8053",
 			`ens {
 			  connection http://localhost:8545/
 			  ipfsgatewayaaaa fe80::b8fb:325d:fb5a:40e7 fe80::b8fb:325d:fb5a:40e8
 			  bad
 			}`,
 			"Testfile:4 - Error during parsing: unknown value bad",
+			"",
+			nil,
+			nil,
+		},
+		{ // 13
+			".",
+			`ens {
+			  connection http://localhost:8545/
+			  ethlinkroot
+			  ipfsgatewayaaaa fe80::b8fb:325d:fb5a:40e7 fe80::b8fb:325d:fb5a:40e8
+			}`,
+			"Testfile:3 - Error during parsing: invalid ethlinkroot; no value",
+			"",
+			nil,
+			nil,
+		},
+		{ // 14
+			".",
+			`ens {
+			  connection http://localhost:8545/
+			  ethlinkroot foo bar
+			  ipfsgatewayaaaa fe80::b8fb:325d:fb5a:40e7 fe80::b8fb:325d:fb5a:40e8
+			}`,
+			"Testfile:3 - Error during parsing: invalid ethlinkroot; multiple values",
+			"",
+			nil,
+			nil,
+		},
+		{ // 15
+			".",
+			`ens {
+			  connection http://localhost:8545/
+			  ethlinkroot eth.link
+			  ipfsgatewayaaaa fe80::b8fb:325d:fb5a:40e7 fe80::b8fb:325d:fb5a:40e8
+			}`,
+			"",
 			"",
 			nil,
 			nil,

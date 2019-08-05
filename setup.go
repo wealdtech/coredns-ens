@@ -8,7 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	ens "github.com/wealdtech/go-ens/v2"
 
-	"github.com/mholt/caddy"
+	"github.com/caddyserver/caddy"
 )
 
 func init() {
@@ -19,7 +19,7 @@ func init() {
 }
 
 func setupENS(c *caddy.Controller) error {
-	connection, root, ipfsGatewayAs, ipfsGatewayAAAAs, err := ensParse(c)
+	connection, ethLinkRoot, ipfsGatewayAs, ipfsGatewayAAAAs, err := ensParse(c)
 	if err != nil {
 		return plugin.Error("ens", err)
 	}
@@ -40,7 +40,7 @@ func setupENS(c *caddy.Controller) error {
 			Next:             next,
 			Client:           client,
 			Registry:         registry,
-			Root:             root,
+			EthLinkRoot:      ethLinkRoot,
 			IPFSGatewayAs:    ipfsGatewayAs,
 			IPFSGatewayAAAAs: ipfsGatewayAAAAs,
 		}
@@ -51,22 +51,9 @@ func setupENS(c *caddy.Controller) error {
 
 func ensParse(c *caddy.Controller) (string, string, []string, []string, error) {
 	var connection string
-	var root string
+	var ethLinkRoot string
 	ipfsGatewayAs := make([]string, 0)
 	ipfsGatewayAAAAs := make([]string, 0)
-
-	// Obtain the root from the key
-	root = c.Key
-	idx := strings.Index(root, "://")
-	if idx != -1 {
-		root = root[idx+3:]
-	}
-	root = strings.TrimPrefix(root, "eth.")
-	idx = strings.Index(root, ":")
-	if idx != -1 {
-		root = root[:idx]
-	}
-	root = strings.TrimSuffix(root, ".")
 
 	c.Next()
 	for c.NextBlock() {
@@ -76,11 +63,19 @@ func ensParse(c *caddy.Controller) (string, string, []string, []string, error) {
 			if len(args) == 0 {
 				return "", "", nil, nil, c.Errf("invalid connection; no value")
 			}
-
 			if len(args) > 1 {
 				return "", "", nil, nil, c.Errf("invalid connection; multiple values")
 			}
 			connection = args[0]
+		case "ethlinkroot":
+			args := c.RemainingArgs()
+			if len(args) == 0 {
+				return "", "", nil, nil, c.Errf("invalid ethlinkroot; no value")
+			}
+			if len(args) > 1 {
+				return "", "", nil, nil, c.Errf("invalid ethlinkroot; multiple values")
+			}
+			ethLinkRoot = args[0]
 		case "ipfsgatewaya":
 			args := c.RemainingArgs()
 			if len(args) == 0 {
@@ -102,5 +97,5 @@ func ensParse(c *caddy.Controller) (string, string, []string, []string, error) {
 	if connection == "" {
 		return "", "", nil, nil, c.Errf("no connection")
 	}
-	return connection, root, ipfsGatewayAs, ipfsGatewayAAAAs, nil
+	return connection, ethLinkRoot, ipfsGatewayAs, ipfsGatewayAAAAs, nil
 }

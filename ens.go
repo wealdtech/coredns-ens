@@ -21,7 +21,7 @@ type ENS struct {
 	Next             plugin.Handler
 	Client           *ethclient.Client
 	Registry         *ens.Registry
-	Root             string
+	EthLinkRoot      string
 	IPFSGatewayAs    []string
 	IPFSGatewayAAAAs []string
 }
@@ -46,26 +46,20 @@ func (e ENS) HasRecords(domain string, name string) (bool, error) {
 
 // Query queries a given domain/name/resource combination
 func (e ENS) Query(domain string, name string, qtype uint16, do bool) ([]dns.RR, error) {
-	log.Infof("request type %d for name %s in domain %v", qtype, name, domain)
+	log.Debugf("request type %d for name %s in domain %v", qtype, name, domain)
 	ensDomain := strings.TrimSuffix(domain, ".")
 
 	results := make([]dns.RR, 0)
 
-	// Hard-coding some items for now; these should be removed if the relevant
-	// domain's records are present on-chain
-	if ensDomain == "" || ensDomain == e.Root {
+	// Hard-coding some items for speed; these should be removed when the
+	// relevant domain's records are present on-chain
+	if ensDomain == "" || ensDomain == e.EthLinkRoot {
 		return results, nil
 	}
 
-	var ethRoot string
-	if e.Root == "" {
-		ethRoot = "eth"
-	} else {
-		ethRoot = fmt.Sprintf("eth.%s", e.Root)
-	}
-	if ethRoot == "eth" || (strings.HasSuffix(ensDomain, ethRoot) && strings.HasSuffix(name, fmt.Sprintf("%s.", e.Root))) {
+	if strings.HasSuffix(ensDomain, e.EthLinkRoot) {
 		// This is a link request, using a secondary domain (e.g. eth.link) to redirect to .eth domains.
-		// Map to a .eth domain and provide relevant information
+		// Map to a .eth domain and provide relevant (munged) information
 		switch qtype {
 		case dns.TypeNS:
 			if !strings.HasPrefix(name, "_") {
@@ -99,6 +93,7 @@ func (e ENS) Query(domain string, name string, qtype uint16, do bool) ([]dns.RR,
 		case dns.TypeTXT:
 			txtRRSet, err := e.obtainTXTRRSet(name, domain)
 			if err == nil && len(txtRRSet) != 0 {
+				log.Infof("TXT record is %v", txtRRSet)
 				// We have a TXT rrset; use it
 				offset := 0
 				for offset < len(txtRRSet) {
@@ -139,7 +134,7 @@ func (e ENS) Query(domain string, name string, qtype uint16, do bool) ([]dns.RR,
 				}
 			} else {
 				if len(hash) > 0 {
-					result, err := dns.NewRR(fmt.Sprintf("%s 3600 IN TXT \"contenthash=%x\"", name, hash))
+					result, err := dns.NewRR(fmt.Sprintf("%s 3600 IN TXT \"contenthash=0x%x\"", name, hash))
 					if err != nil {
 						log.Warnf("error creating contenthash TXT RR: %v", err)
 					} else {
@@ -247,7 +242,7 @@ func (e ENS) Query(domain string, name string, qtype uint16, do bool) ([]dns.RR,
 	resolver, err := ens.NewDNSResolver(e.Client, ensDomain)
 	if err != nil {
 		if err.Error() != "no contract code at given address" {
-			log.Warnf("error obtaining DNS resolver: %v", err)
+			log.Warnf("error obtaining DNS resolver for %v: %v", ensDomain, err)
 		}
 		return results, err
 	}
@@ -282,17 +277,19 @@ func (e ENS) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (in
 	a.Answer, a.Ns, a.Extra, result = Lookup(e, state)
 	switch result {
 	case Success:
+		state.SizeAndDo(a)
+		w.WriteMsg(a)
+		return 0, nil
 	case NoData:
+		return plugin.NextOrFailure(e.Name(), e.Next, ctx, w, r)
 	case NameError:
 		a.Rcode = dns.RcodeNameError
 	case ServerFailure:
 		return dns.RcodeServerFailure, nil
 	}
+	// Unknown result...
+	return dns.RcodeServerFailure, nil
 
-	state.SizeAndDo(a)
-	w.WriteMsg(a)
-
-	return 0, nil
 }
 
 func (e ENS) obtainARRSet(name string, domain string) ([]byte, error) {
@@ -361,8 +358,8 @@ func (e ENS) Name() string { return "ens" }
 // linkToEth obtains the .eth domain from the DNS domain
 func (e ENS) linkToEth(domain string) string {
 	ethDomain := strings.TrimSuffix(domain, ".")
-	if e.Root != "" {
-		ethDomain = strings.TrimSuffix(ethDomain, fmt.Sprintf(".%s", e.Root))
+	if e.EthLinkRoot != "" {
+		ethDomain = fmt.Sprintf("%s.eth", strings.TrimSuffix(ethDomain, fmt.Sprintf(".%s", e.EthLinkRoot)))
 	}
 	return ethDomain
 }
