@@ -29,6 +29,9 @@ type ENS struct {
 
 // IsAuthoritative checks if the ENS plugin is authoritative for a given domain
 func (e ENS) IsAuthoritative(domain string) bool {
+	if strings.HasSuffix(strings.TrimSuffix(domain, "."), e.EthLinkRoot) {
+		return true
+	}
 	// We consider ourselves authoritative if the domain has an SOA record in ENS
 	rr, err := e.Query(domain, domain, dns.TypeNS, false)
 	return err == nil && len(rr) > 0
