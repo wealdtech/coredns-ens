@@ -8,14 +8,14 @@ RUN apt-get update && \
     update-ca-certificates
 RUN apt-get -y install ed git golang-go make
 
-ADD build.sh /
-RUN chmod 755 ./build.sh && ./build.sh
+ADD . /coredns-ens/
+RUN chmod 755 coredns-ens/build.sh && coredns-ens/build.sh
 
-FROM scratch
+FROM ubuntu:latest
 COPY --from=0 /etc/ssl/certs /etc/ssl/certs
-COPY --from=0 /coredns /usr/local/bin
+COPY --from=0 /coredns /coredns
 
 EXPOSE 53 53/udp
 EXPOSE 853
 EXPOSE 443
-ENTRYPOINT ["coredns"]
+ENTRYPOINT ["/coredns"]
