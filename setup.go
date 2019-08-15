@@ -19,7 +19,7 @@ func init() {
 }
 
 func setupENS(c *caddy.Controller) error {
-	connection, ethLinkRoot, acmeTarget, ipfsGatewayAs, ipfsGatewayAAAAs, err := ensParse(c)
+	connection, ethLinkRoot, ipfsGatewayAs, ipfsGatewayAAAAs, err := ensParse(c)
 	if err != nil {
 		return plugin.Error("ens", err)
 	}
@@ -41,7 +41,6 @@ func setupENS(c *caddy.Controller) error {
 			Client:           client,
 			Registry:         registry,
 			EthLinkRoot:      ethLinkRoot,
-			ACMETarget:       acmeTarget,
 			IPFSGatewayAs:    ipfsGatewayAs,
 			IPFSGatewayAAAAs: ipfsGatewayAAAAs,
 		}
@@ -50,10 +49,9 @@ func setupENS(c *caddy.Controller) error {
 	return nil
 }
 
-func ensParse(c *caddy.Controller) (string, string, string, []string, []string, error) {
+func ensParse(c *caddy.Controller) (string, string, []string, []string, error) {
 	var connection string
 	var ethLinkRoot string
-	var acmeTarget string
 	ipfsGatewayAs := make([]string, 0)
 	ipfsGatewayAAAAs := make([]string, 0)
 
@@ -78,15 +76,6 @@ func ensParse(c *caddy.Controller) (string, string, string, []string, []string, 
 				return "", "", "", nil, nil, c.Errf("invalid ethlinkroot; multiple values")
 			}
 			ethLinkRoot = args[0]
-		case "acmetarget":
-			args := c.RemainingArgs()
-			if len(args) == 0 {
-				return "", "", "", nil, nil, c.Errf("invalid acmetarget; no value")
-			}
-			if len(args) > 1 {
-				return "", "", "", nil, nil, c.Errf("invalid acmetarget; multiple values")
-			}
-			acmeTarget = args[0]
 		case "ipfsgatewaya":
 			args := c.RemainingArgs()
 			if len(args) == 0 {
@@ -108,5 +97,5 @@ func ensParse(c *caddy.Controller) (string, string, string, []string, []string, 
 	if connection == "" {
 		return "", "", "", nil, nil, c.Errf("no connection")
 	}
-	return connection, ethLinkRoot, acmeTarget, ipfsGatewayAs, ipfsGatewayAAAAs, nil
+	return connection, ethLinkRoot, ipfsGatewayAs, ipfsGatewayAAAAs, nil
 }
