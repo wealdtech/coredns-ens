@@ -11,7 +11,7 @@ import (
 	"github.com/coredns/coredns/request"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/labstack/gommon/log"
-	ens "github.com/wealdtech/go-ens/v2"
+	ens "github.com/wealdtech/go-ens/v3"
 
 	"github.com/miekg/dns"
 )
