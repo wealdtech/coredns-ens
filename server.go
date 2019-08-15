@@ -43,13 +43,10 @@ func lowestAuthoritativeDomain(server Server, name string) string {
 	parts := strings.Split(name, ".")
 	var authoritativeDomain string
 	testDomain := ""
-	numParts := len(parts)
-	for i := 0; i < numParts; i++ {
-		if testDomain == "." {
-			testDomain = parts[numParts-1-i] + testDomain
-		} else {
-			testDomain = parts[numParts-1-i] + "." + testDomain
-		}
+	// Iterate backwards. Skip the last part, as it's always empty
+	// (domains are dot-terminated).
+	for i := len(parts) - 2; i >= 0; i-- {
+		testDomain = parts[i] + "." + testDomain
 		if server.IsAuthoritative(testDomain) {
 			authoritativeDomain = testDomain
 		}
@@ -161,7 +158,7 @@ func Lookup(server Server, state request.Request) ([]dns.RR, []dns.RR, []dns.RR,
 			return nil, nil, nil, ServerFailure
 		}
 		// Nameserver records require additional processing
-		if domain != name {
+		if domain != name || len(nsRrs) == 0 {
 			return nil, nil, nil, NoData
 		}
 		// Add glue for the NS records if present

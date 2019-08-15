@@ -1,6 +1,7 @@
 package ens
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/coredns/coredns/core/dnsserver"
@@ -61,41 +62,44 @@ func ensParse(c *caddy.Controller) (string, string, []string, []string, error) {
 		case "connection":
 			args := c.RemainingArgs()
 			if len(args) == 0 {
-				return "", "", "", nil, nil, c.Errf("invalid connection; no value")
+				return "", "", nil, nil, c.Errf("invalid connection; no value")
 			}
 			if len(args) > 1 {
-				return "", "", "", nil, nil, c.Errf("invalid connection; multiple values")
+				return "", "", nil, nil, c.Errf("invalid connection; multiple values")
 			}
 			connection = args[0]
 		case "ethlinkroot":
 			args := c.RemainingArgs()
 			if len(args) == 0 {
-				return "", "", "", nil, nil, c.Errf("invalid ethlinkroot; no value")
+				return "", "", nil, nil, c.Errf("invalid ethlinkroot; no value")
 			}
 			if len(args) > 1 {
-				return "", "", "", nil, nil, c.Errf("invalid ethlinkroot; multiple values")
+				return "", "", nil, nil, c.Errf("invalid ethlinkroot; multiple values")
 			}
 			ethLinkRoot = args[0]
+			if !strings.HasSuffix(ethLinkRoot, ".") {
+				ethLinkRoot = fmt.Sprintf("%s.", ethLinkRoot)
+			}
 		case "ipfsgatewaya":
 			args := c.RemainingArgs()
 			if len(args) == 0 {
-				return "", "", "", nil, nil, c.Errf("invalid IPFS gateway A; no value")
+				return "", "", nil, nil, c.Errf("invalid IPFS gateway A; no value")
 			}
 			ipfsGatewayAs = make([]string, len(args))
 			copy(ipfsGatewayAs, args)
 		case "ipfsgatewayaaaa":
 			args := c.RemainingArgs()
 			if len(args) == 0 {
-				return "", "", "", nil, nil, c.Errf("invalid IPFS gateway AAAA; no value")
+				return "", "", nil, nil, c.Errf("invalid IPFS gateway AAAA; no value")
 			}
 			ipfsGatewayAAAAs = make([]string, len(args))
 			copy(ipfsGatewayAAAAs, args)
 		default:
-			return "", "", "", nil, nil, c.Errf("unknown value %v", c.Val())
+			return "", "", nil, nil, c.Errf("unknown value %v", c.Val())
 		}
 	}
 	if connection == "" {
-		return "", "", "", nil, nil, c.Errf("no connection")
+		return "", "", nil, nil, c.Errf("no connection")
 	}
 	return connection, ethLinkRoot, ipfsGatewayAs, ipfsGatewayAAAAs, nil
 }

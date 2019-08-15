@@ -28,7 +28,7 @@ type ENS struct {
 
 // IsAuthoritative checks if the ENS plugin is authoritative for a given domain
 func (e ENS) IsAuthoritative(domain string) bool {
-	if strings.HasSuffix(strings.TrimSuffix(domain, "."), e.EthLinkRoot) {
+	if strings.HasSuffix(domain, e.EthLinkRoot) {
 		return true
 	}
 	// We consider ourselves authoritative if the domain has an SOA record in ENS
@@ -39,7 +39,7 @@ func (e ENS) IsAuthoritative(domain string) bool {
 // HasRecords checks if there are any records for a specific domain and name.
 // This is used for wildcard eligibility
 func (e ENS) HasRecords(domain string, name string) (bool, error) {
-	resolver, err := ens.NewDNSResolver(e.Client, domain)
+	resolver, err := ens.NewDNSResolver(e.Client, strings.TrimSuffix(domain, "."))
 	if err != nil {
 		return false, err
 	}
@@ -50,16 +50,15 @@ func (e ENS) HasRecords(domain string, name string) (bool, error) {
 // Query queries a given domain/name/resource combination
 func (e ENS) Query(domain string, name string, qtype uint16, do bool) ([]dns.RR, error) {
 	log.Debugf("request type %d for name %s in domain %v", qtype, name, domain)
-	ensDomain := strings.TrimSuffix(domain, ".")
 
 	results := make([]dns.RR, 0)
 
 	// Short-circuit empty ENS domain
-	if ensDomain == "" {
+	if domain == "." {
 		return results, nil
 	}
 
-	if strings.HasSuffix(ensDomain, e.EthLinkRoot) {
+	if strings.HasSuffix(domain, e.EthLinkRoot) {
 		var ethLinkResults []dns.RR
 		var err error
 		// This is a link request, using a secondary domain (e.g. eth.link) to redirect to .eth domains.
@@ -86,10 +85,10 @@ func (e ENS) Query(domain string, name string, qtype uint16, do bool) ([]dns.RR,
 	}
 
 	// Fetch whatever data we have on-chain for this RRset
-	resolver, err := ens.NewDNSResolver(e.Client, ensDomain)
+	resolver, err := ens.NewDNSResolver(e.Client, strings.TrimSuffix(domain, "."))
 	if err != nil {
 		if err.Error() != "no contract code at given address" {
-			log.Warnf("error obtaining DNS resolver for %v: %v", ensDomain, err)
+			log.Warnf("error obtaining DNS resolver for %v: %v", domain, err)
 		}
 		return results, err
 	}
@@ -209,17 +208,17 @@ func (e ENS) Name() string { return "ens" }
 
 // linkToEth obtains the .eth domain from the DNS domain
 func (e ENS) linkToEth(domain string) string {
-	ethDomain := strings.TrimSuffix(domain, ".")
 	if e.EthLinkRoot != "" {
-		ethDomain = fmt.Sprintf("%s.eth", strings.TrimSuffix(ethDomain, fmt.Sprintf(".%s", e.EthLinkRoot)))
+		return fmt.Sprintf("%seth", strings.TrimSuffix(domain, e.EthLinkRoot))
+	} else {
+		return strings.TrimSuffix(domain, ".")
 	}
-	return ethDomain
 }
 
 // handleEthLinkSOA handles a request for a SOA within the ethLink domain
 func (e ENS) handleEthLinkSOA(name string, domain string) ([]dns.RR, error) {
 	results := make([]dns.RR, 0)
-	if name == fmt.Sprintf("%s.", e.EthLinkRoot) {
+	if name == e.EthLinkRoot {
 		// Create a synthetic SOA record
 		now := time.Now()
 		ser := ((now.Hour()*3600 + now.Minute()) * 100) / 86400
