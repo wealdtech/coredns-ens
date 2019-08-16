@@ -54,6 +54,22 @@ func lowestAuthoritativeDomain(server Server, name string) string {
 	return authoritativeDomain
 }
 
+// Obtain the highest domain for which we are authoritative
+func highestAuthoritativeDomain(server Server, name string) string {
+	for name != "" {
+		if server.IsAuthoritative(name) {
+			return name
+		}
+		dotIndex := strings.Index(name, ".")
+		if dotIndex > 0 {
+			name = name[dotIndex+1:]
+		} else {
+			break
+		}
+	}
+	return "."
+}
+
 // Lookup contains the logic required to move through A DNS hierarchy and
 // gather the appropriate records
 func Lookup(server Server, state request.Request) ([]dns.RR, []dns.RR, []dns.RR, Result) {
@@ -69,7 +85,7 @@ func Lookup(server Server, state request.Request) ([]dns.RR, []dns.RR, []dns.RR,
 	if !strings.HasSuffix(name, ".") {
 		name = name + "."
 	}
-	domain := lowestAuthoritativeDomain(server, name)
+	domain := highestAuthoritativeDomain(server, name)
 	if domain == "" {
 		// We aren't authoritative for anything here
 		return nil, nil, nil, NoData

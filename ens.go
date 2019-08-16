@@ -2,6 +2,7 @@
 package ens
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -16,24 +17,31 @@ import (
 	"github.com/miekg/dns"
 )
 
+var emptyContentHash = []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+
 // ENS is a plugin that returns information held in the Ethereum Name Service.
 type ENS struct {
-	Next             plugin.Handler
-	Client           *ethclient.Client
-	Registry         *ens.Registry
-	EthLinkRoot      string
-	IPFSGatewayAs    []string
-	IPFSGatewayAAAAs []string
+	Next               plugin.Handler
+	Client             *ethclient.Client
+	Registry           *ens.Registry
+	EthLinkNameServers []string
+	IPFSGatewayAs      []string
+	IPFSGatewayAAAAs   []string
 }
 
 // IsAuthoritative checks if the ENS plugin is authoritative for a given domain
 func (e ENS) IsAuthoritative(domain string) bool {
-	if strings.HasSuffix(domain, e.EthLinkRoot) {
-		return true
+	registry, err := ens.NewRegistry(e.Client)
+	if err != nil {
+		return false
 	}
-	// We consider ourselves authoritative if the domain has an SOA record in ENS
-	rr, err := e.Query(domain, domain, dns.TypeNS, false)
-	return err == nil && len(rr) > 0
+
+	controllerAddress, err := registry.Owner(strings.TrimSuffix(domain, "."))
+	if err != nil {
+		return false
+	}
+
+	return controllerAddress != ens.UnknownAddress
 }
 
 // HasRecords checks if there are any records for a specific domain and name.
@@ -53,62 +61,203 @@ func (e ENS) Query(domain string, name string, qtype uint16, do bool) ([]dns.RR,
 
 	results := make([]dns.RR, 0)
 
-	// Short-circuit empty ENS domain
-	if domain == "." {
-		return results, nil
+	// If the requested domain has a content hash we alter a number of the records returned
+	var contentHash []byte
+	hasContentHash := false
+	var err error
+	if qtype == dns.TypeSOA ||
+		qtype == dns.TypeNS ||
+		qtype == dns.TypeTXT ||
+		qtype == dns.TypeA ||
+		qtype == dns.TypeAAAA {
+		contentHash, err = e.obtainContentHash(name, domain)
+		hasContentHash = err == nil && bytes.Compare(contentHash, emptyContentHash) > 0
 	}
-
-	if strings.HasSuffix(domain, e.EthLinkRoot) {
-		var ethLinkResults []dns.RR
-		var err error
-		// This is a link request, using a secondary domain (e.g. eth.link) to redirect to .eth domains.
-		// Map to a .eth domain and provide relevant (munged) information
+	if hasContentHash {
 		switch qtype {
 		case dns.TypeSOA:
-			ethLinkResults, err = e.handleEthLinkSOA(name, domain)
+			results, err = e.handleSOA(name, domain, contentHash)
+		case dns.TypeNS:
+			results, err = e.handleNS(name, domain, contentHash)
 		case dns.TypeTXT:
-			ethLinkResults, err = e.handleEthLinkTXT(name, domain)
+			results, err = e.handleTXT(name, domain, contentHash)
 		case dns.TypeA:
-			ethLinkResults, err = e.handleEthLinkA(name, domain)
+			results, err = e.handleA(name, domain, contentHash)
 		case dns.TypeAAAA:
-			ethLinkResults, err = e.handleEthLinkAAAA(name, domain)
-		default:
-			// Unknown request; ignore
-			ethLinkResults = make([]dns.RR, 0)
+			results, err = e.handleAAAA(name, domain, contentHash)
 		}
+	} else {
+		ethDomain := strings.TrimSuffix(domain, ".")
+		resolver, err := ens.NewDNSResolver(e.Client, ethDomain)
 		if err != nil {
-			log.Warnf("failed to handle an EthLink %v request for %v: %v", qtype, name, err)
-		} else {
-			results = append(results, ethLinkResults...)
+			if !strings.Contains(err.Error(), "is not a DNS resolver contract") {
+				log.Warnf("error obtaining DNS resolver for %v: %v", ethDomain, err)
+				return results, err
+			}
+			// No DNS resolver is fine; just return no results
+			return results, nil
 		}
-		return results, err
-	}
 
-	// Fetch whatever data we have on-chain for this RRset
-	resolver, err := ens.NewDNSResolver(e.Client, strings.TrimSuffix(domain, "."))
-	if err != nil {
-		if err.Error() != "no contract code at given address" {
-			log.Warnf("error obtaining DNS resolver for %v: %v", domain, err)
+		data, err := resolver.Record(name, qtype)
+		if err != nil {
+			return results, err
 		}
-		return results, err
+
+		offset := 0
+		for offset < len(data) {
+			var result dns.RR
+			result, offset, err = dns.UnpackRR(data, offset)
+			if err == nil {
+				results = append(results, result)
+			}
+		}
 	}
 
-	data, err := resolver.Record(name, qtype)
-	if err != nil {
-		log.Warnf("error obtaining DNS record: %v", err)
-		return results, err
+	return results, nil
+}
+
+func (e ENS) handleSOA(name string, domain string, contentHash []byte) ([]dns.RR, error) {
+	results := make([]dns.RR, 0)
+	if len(e.EthLinkNameServers) > 0 {
+		// Create a synthetic SOA record
+		now := time.Now()
+		ser := ((now.Hour()*3600 + now.Minute()) * 100) / 86400
+		dateStr := fmt.Sprintf("%04d%02d%02d%02d", now.Year(), now.Month(), now.Day(), ser)
+		result, err := dns.NewRR(fmt.Sprintf("%s 10800 IN SOA %s hostmaster.%s %s 3600 600 1209600 300", e.EthLinkNameServers[0], name, name, dateStr))
+		if err != nil {
+			return results, err
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
+
+func (e ENS) handleNS(name string, domain string, contentHash []byte) ([]dns.RR, error) {
+	results := make([]dns.RR, 0)
+	for _, nameserver := range e.EthLinkNameServers {
+		result, err := dns.NewRR(fmt.Sprintf("%s 3600 IN NS %s", domain, nameserver))
+		if err != nil {
+			return results, err
+		}
+		results = append(results, result)
 	}
 
-	offset := 0
-	for offset < len(data) {
-		var result dns.RR
-		result, offset, err = dns.UnpackRR(data, offset)
-		if err == nil {
+	return results, nil
+}
+
+func (e ENS) handleTXT(name string, domain string, contentHash []byte) ([]dns.RR, error) {
+	results := make([]dns.RR, 0)
+	txtRRSet, err := e.obtainTXTRRSet(name, domain)
+	if err == nil && len(txtRRSet) != 0 {
+		// We have a TXT rrset; use it
+		offset := 0
+		for offset < len(txtRRSet) {
+			var result dns.RR
+			result, offset, err = dns.UnpackRR(txtRRSet, offset)
+			if err == nil {
+				results = append(results, result)
+			}
+		}
+	}
+
+	if isRealOnChainDomain(name, domain) {
+		ethDomain := strings.TrimSuffix(domain, ".")
+		resolver, err := ens.NewResolver(e.Client, ethDomain)
+		if err != nil {
+			log.Warnf("error obtaining resolver for %s: %v", ethDomain, err)
+			return results, nil
+		}
+
+		address, err := resolver.Address()
+		if err != nil {
+			if err.Error() != "abi: unmarshalling empty output" {
+				return results, err
+			}
+			return results, nil
+		}
+
+		if address != ens.UnknownAddress {
+			result, err := dns.NewRR(fmt.Sprintf("%s 3600 IN TXT \"a=%s\"", name, address.Hex()))
+			if err != nil {
+				return results, err
+			}
 			results = append(results, result)
 		}
 	}
 
-	return results, err
+	result, err := dns.NewRR(fmt.Sprintf("%s 3600 IN TXT \"contenthash=0x%x\"", name, contentHash))
+	if err != nil {
+		return results, err
+	}
+	results = append(results, result)
+
+	// Also provide dnslink for compatibility with older IPFS gateways
+	contentHashStr, err := ens.ContenthashToString(contentHash)
+	if err != nil {
+		return results, err
+	}
+	result, err = dns.NewRR(fmt.Sprintf("%s 3600 IN TXT \"dnslink=%s\"", name, contentHashStr))
+	if err != nil {
+		return results, nil
+	}
+	results = append(results, result)
+
+	return results, nil
+}
+
+func (e ENS) handleA(name string, domain string, contentHash []byte) ([]dns.RR, error) {
+	results := make([]dns.RR, 0)
+
+	aRRSet, err := e.obtainARRSet(name, domain)
+	if err == nil && len(aRRSet) != 0 {
+		// We have an A rrset; use it
+		offset := 0
+		for offset < len(aRRSet) {
+			var result dns.RR
+			result, offset, err = dns.UnpackRR(aRRSet, offset)
+			if err == nil {
+				results = append(results, result)
+			}
+		}
+	} else {
+		// We have a content hash but no A record; use the default
+		for i := range e.IPFSGatewayAs {
+			result, err := dns.NewRR(fmt.Sprintf("%s 3600 IN A %s", name, e.IPFSGatewayAs[i]))
+			if err != nil {
+				return results, err
+			}
+			results = append(results, result)
+		}
+	}
+
+	return results, nil
+}
+
+func (e ENS) handleAAAA(name string, domain string, contentHash []byte) ([]dns.RR, error) {
+	results := make([]dns.RR, 0)
+
+	aaaaRRSet, err := e.obtainAAAARRSet(name, domain)
+	if err == nil && len(aaaaRRSet) != 0 {
+		// We have an AAAA rrset; use it
+		offset := 0
+		for offset < len(aaaaRRSet) {
+			var result dns.RR
+			result, offset, err = dns.UnpackRR(aaaaRRSet, offset)
+			if err == nil {
+				results = append(results, result)
+			}
+		}
+	} else {
+		// We have a content hash but no AAAA record; use the default
+		for i := range e.IPFSGatewayAAAAs {
+			result, err := dns.NewRR(fmt.Sprintf("%s 3600 IN AAAA %s", name, e.IPFSGatewayAAAAs[i]))
+			if err != nil {
+				log.Warnf("error creating %s AAAA RR: %v", name, err)
+			}
+			results = append(results, result)
+		}
+	}
+	return results, nil
 }
 
 // ServeDNS implements the plugin.Handler interface.
@@ -144,44 +293,44 @@ func (e ENS) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (in
 }
 
 func (e ENS) obtainARRSet(name string, domain string) ([]byte, error) {
-	ethDomain := e.linkToEth(name)
+	ethDomain := strings.TrimSuffix(domain, ".")
 	resolver, err := ens.NewDNSResolver(e.Client, ethDomain)
 	if err != nil {
 		if err.Error() == "no contract code at given address" ||
 			strings.HasSuffix(err.Error(), " is not a DNS resolver contract") {
 			return []byte{}, nil
 		}
-		log.Warnf("error obtaining resolver: %v", err)
+		log.Warnf("error obtaining resolver for %s: %v", ethDomain, err)
 		return []byte{}, err
 	}
 
-	return resolver.Record("", dns.TypeA)
+	return resolver.Record(name, dns.TypeA)
 }
 
 func (e ENS) obtainAAAARRSet(name string, domain string) ([]byte, error) {
-	ethDomain := e.linkToEth(name)
+	ethDomain := strings.TrimSuffix(domain, ".")
 	resolver, err := ens.NewDNSResolver(e.Client, ethDomain)
 	if err != nil {
 		if err.Error() == "no contract code at given address" ||
 			strings.HasSuffix(err.Error(), " is not a DNS resolver contract") {
 			return []byte{}, nil
 		}
-		log.Warnf("error obtaining resolver: %v", err)
+		log.Warnf("error obtaining resolver for %s: %v", ethDomain, err)
 		return []byte{}, err
 	}
 
-	return resolver.Record("", dns.TypeAAAA)
+	return resolver.Record(name, dns.TypeAAAA)
 }
 
-func (e ENS) obtainContenthash(name string, domain string) ([]byte, error) {
-	ethDomain := e.linkToEth(name)
+func (e ENS) obtainContentHash(name string, domain string) ([]byte, error) {
+	ethDomain := strings.TrimSuffix(domain, ".")
 	resolver, err := ens.NewResolver(e.Client, ethDomain)
 	if err != nil {
 		if err.Error() == "no contract code at given address" ||
 			strings.HasSuffix(err.Error(), " is not a DNS resolver contract") {
 			return []byte{}, nil
 		}
-		log.Warnf("error obtaining resolver: %v", err)
+		log.Warnf("error obtaining resolver for %s: %v", ethDomain, err)
 		return []byte{}, err
 	}
 
@@ -189,208 +338,26 @@ func (e ENS) obtainContenthash(name string, domain string) ([]byte, error) {
 }
 
 func (e ENS) obtainTXTRRSet(name string, domain string) ([]byte, error) {
-	ethDomain := e.linkToEth(name)
+	ethDomain := strings.TrimSuffix(domain, ".")
 	resolver, err := ens.NewDNSResolver(e.Client, ethDomain)
 	if err != nil {
 		if err.Error() == "no contract code at given address" ||
 			strings.HasSuffix(err.Error(), " is not a DNS resolver contract") {
 			return []byte{}, nil
 		}
-		log.Warnf("error obtaining resolver: %v", err)
+		log.Warnf("error obtaining resolver for %s: %v", ethDomain, err)
 		return []byte{}, err
 	}
 
-	return resolver.Record("", dns.TypeTXT)
+	return resolver.Record(name, dns.TypeTXT)
 }
 
 // Name implements the Handler interface.
 func (e ENS) Name() string { return "ens" }
 
-// linkToEth obtains the .eth domain from the DNS domain
-func (e ENS) linkToEth(domain string) string {
-	if e.EthLinkRoot != "" {
-		return fmt.Sprintf("%seth", strings.TrimSuffix(domain, e.EthLinkRoot))
-	} else {
-		return strings.TrimSuffix(domain, ".")
-	}
-}
-
-// handleEthLinkSOA handles a request for a SOA within the ethLink domain
-func (e ENS) handleEthLinkSOA(name string, domain string) ([]dns.RR, error) {
-	results := make([]dns.RR, 0)
-	if name == e.EthLinkRoot {
-		// Create a synthetic SOA record
-		now := time.Now()
-		ser := ((now.Hour()*3600 + now.Minute()) * 100) / 86400
-		dateStr := fmt.Sprintf("%04d%02d%02d%02d", now.Year(), now.Month(), now.Day(), ser)
-		result, err := dns.NewRR(fmt.Sprintf("%s 10800 IN SOA ns3.ethdns.xyz. hostmaster.%s %s 3600 600 1209600 300", name, name, dateStr))
-		if err != nil {
-			return results, err
-		}
-		results = append(results, result)
-	}
-	return results, nil
-}
-
-// handleEthLinkTXT handles a request for a TXT within the ethLink domain
-func (e ENS) handleEthLinkTXT(name string, domain string) ([]dns.RR, error) {
-	results := make([]dns.RR, 0)
-	txtRRSet, err := e.obtainTXTRRSet(name, domain)
-	if err == nil && len(txtRRSet) != 0 {
-		// We have a TXT rrset; use it
-		offset := 0
-		for offset < len(txtRRSet) {
-			var result dns.RR
-			result, offset, err = dns.UnpackRR(txtRRSet, offset)
-			if err == nil {
-				results = append(results, result)
-			}
-		}
-	}
-
-	// Fetch content hash
-	ethDomain := e.linkToEth(name)
-	resolver, err := ens.NewResolver(e.Client, ethDomain)
-	if err != nil {
-		log.Warnf("error obtaining resolver: %v", err)
-		return results, nil
-	}
-
-	address, err := resolver.Address()
-	if err != nil {
-		if err.Error() != "abi: unmarshalling empty output" {
-			return results, err
-		}
-		return results, nil
-	}
-
-	if address != ens.UnknownAddress {
-		result, err := dns.NewRR(fmt.Sprintf("%s 3600 IN TXT \"a=%s\"", name, address.Hex()))
-		if err != nil {
-			return results, err
-		}
-		results = append(results, result)
-	}
-
-	hash, err := resolver.Contenthash()
-	if err != nil {
-		if err.Error() == "abi: unmarshalling empty output" {
-			return results, nil
-		}
-		return results, err
-	}
-
-	if len(hash) > 0 {
-		result, err := dns.NewRR(fmt.Sprintf("%s 3600 IN TXT \"contenthash=0x%x\"", name, hash))
-		if err != nil {
-			return results, err
-		}
-		results = append(results, result)
-
-		// Also provide dnslink for compatibility with older IPFS gateways
-		contentHash, err := ens.ContenthashToString(hash)
-		if err != nil {
-			return results, err
-		}
-		result, err = dns.NewRR(fmt.Sprintf("%s 3600 IN TXT \"dnslink=%s\"", name, contentHash))
-		if err != nil {
-			return results, nil
-		}
-		results = append(results, result)
-	}
-
-	return results, nil
-}
-
-// handleEthLinkA handles a request for a A within the ethLink domain
-func (e ENS) handleEthLinkA(name string, domain string) ([]dns.RR, error) {
-	results := make([]dns.RR, 0)
-
-	// If the name is empty return our gateway
-	if name == domain {
-		for i := range e.IPFSGatewayAs {
-			result, err := dns.NewRR(fmt.Sprintf("%s 3600 IN A %s", domain, e.IPFSGatewayAs[i]))
-			if err != nil {
-				return results, err
-			}
-			results = append(results, result)
-		}
-		return results, nil
-	}
-
-	// We want to return a default A rrset if the .eth resolver has a content
-	// hash but not an A rrset
-	aRRSet, err := e.obtainARRSet(name, domain)
-	if err == nil && len(aRRSet) != 0 {
-		// We have an A rrset; use it
-		offset := 0
-		for offset < len(aRRSet) {
-			var result dns.RR
-			result, offset, err = dns.UnpackRR(aRRSet, offset)
-			if err == nil {
-				results = append(results, result)
-			}
-		}
-	} else {
-		if len(e.IPFSGatewayAs) > 0 {
-			contenthash, err := e.obtainContenthash(name, domain)
-			if err == nil && len(contenthash) != 0 {
-				// We have a content hash but no A record; use the default
-				for i := range e.IPFSGatewayAs {
-					result, err := dns.NewRR(fmt.Sprintf("%s 3600 IN A %s", name, e.IPFSGatewayAs[i]))
-					if err != nil {
-						return results, err
-					}
-					results = append(results, result)
-				}
-			}
-		}
-	}
-	return results, nil
-}
-
-// handleEthLinkAAAA handles a request for a AAAA within the ethLink domain
-func (e ENS) handleEthLinkAAAA(name string, domain string) ([]dns.RR, error) {
-	results := make([]dns.RR, 0)
-	if name == domain {
-		for i := range e.IPFSGatewayAAAAs {
-			result, err := dns.NewRR(fmt.Sprintf("%s 3600 IN AAAA %s", domain, e.IPFSGatewayAAAAs[i]))
-			if err != nil {
-				return results, err
-			}
-			results = append(results, result)
-		}
-		return results, nil
-	}
-
-	// We want to return a default A rrset if the .eth resolver has a content
-	// We want to return a default AAAA rrset if the .eth resolver has a content
-	// hash but not an AAAA rrset
-	aaaaRRSet, err := e.obtainAAAARRSet(name, domain)
-	if err == nil && len(aaaaRRSet) != 0 {
-		// We have an AAAA rrset; use it
-		offset := 0
-		for offset < len(aaaaRRSet) {
-			var result dns.RR
-			result, offset, err = dns.UnpackRR(aaaaRRSet, offset)
-			if err == nil {
-				results = append(results, result)
-			}
-		}
-	} else {
-		if len(e.IPFSGatewayAAAAs) > 0 {
-			contenthash, err := e.obtainContenthash(name, domain)
-			if err == nil && len(contenthash) != 0 {
-				// We have a content hash but no AAAA record; use the default
-				for i := range e.IPFSGatewayAAAAs {
-					result, err := dns.NewRR(fmt.Sprintf("%s 3600 IN AAAA %s", name, e.IPFSGatewayAAAAs[i]))
-					if err != nil {
-						log.Warnf("error creating %s AAAA RR: %v", name, err)
-					}
-					results = append(results, result)
-				}
-			}
-		}
-	}
-	return results, nil
+// isRealOnChainDomain will return true if the name requested
+// is also the domain, which implies the entry has an on-chain
+// presence
+func isRealOnChainDomain(name string, domain string) bool {
+	return name == domain
 }

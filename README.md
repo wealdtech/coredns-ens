@@ -30,6 +30,12 @@ The plugin has a number of configuration options.  An example annotated Corefile
 ```
 # This section enables DNS lookups for all domains on ENS
 . {
+  rewrite stop {
+    # This rewrites any requests for *.eth.link domains to *.eth internally
+    # prior to being processed by the main ENS resolver.
+    name regex (.*)\.eth\.link {1}.eth
+    answer name (.*)\.eth {1}.eth.link
+  }
   ens {
     # connection is the connection to an Ethereum node.  It is *highly*
     # recommended that a local node is used, as remote connections can
@@ -38,23 +44,10 @@ The plugin has a number of configuration options.  An example annotated Corefile
     # endpoint.
     connection /home/ethereum/.ethereum/geth.ipc
 
-    # ethlinkroot is the root of the Ethlink domains.  If requests are
-    # received that end in this value it is replaced with `.eth` and
-    # names are treated as IPFS gateway names.
-    #
-    # IPFS gateway names are treated as a special case by the resolver
-    # if they have a `contenthash` ENS record:
-    #  - if the request is for an SOA record, a synthetic SOA record is
-    #    created that points to the EthDNS servers
-    #  - if the request is for an NS record, a synthetic NS record is
-    #    created that points to the EthDNS servers
-    #  - if the request is for an A or AAAA record, and the name does not
-    #    have an existing A or AAAA record, the default gateway address
-    #    is returned (see `ipfsgatewaya` and `ipfsgatewayaaaa` options
-    #    below)
-    #  - if the request is for a TXT record, the contenthash is returned
-    #    as both an IPFS dnslink and a hex-encoded value
-    ethlinkroot eth.link
+    # ethlinknameservers are the names of the nameservers that serve
+    # EthLink domains.  This will usually be the name of this server,
+    # plus potentially one or more others.
+    ethlinknameservers ns1.ethdns.xyz ns2.ethdns.xyz
 
     # ipfsgatewaya is the address of an ENS-enabled IPFS gateway.
     # This value is returned when a request for an A record of an Ethlink

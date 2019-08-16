@@ -1,7 +1,6 @@
 package ens
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/coredns/coredns/core/dnsserver"
@@ -20,7 +19,7 @@ func init() {
 }
 
 func setupENS(c *caddy.Controller) error {
-	connection, ethLinkRoot, ipfsGatewayAs, ipfsGatewayAAAAs, err := ensParse(c)
+	connection, ethLinkNameServers, ipfsGatewayAs, ipfsGatewayAAAAs, err := ensParse(c)
 	if err != nil {
 		return plugin.Error("ens", err)
 	}
@@ -38,21 +37,21 @@ func setupENS(c *caddy.Controller) error {
 
 	dnsserver.GetConfig(c).AddPlugin(func(next plugin.Handler) plugin.Handler {
 		return ENS{
-			Next:             next,
-			Client:           client,
-			Registry:         registry,
-			EthLinkRoot:      ethLinkRoot,
-			IPFSGatewayAs:    ipfsGatewayAs,
-			IPFSGatewayAAAAs: ipfsGatewayAAAAs,
+			Next:               next,
+			Client:             client,
+			EthLinkNameServers: ethLinkNameServers,
+			Registry:           registry,
+			IPFSGatewayAs:      ipfsGatewayAs,
+			IPFSGatewayAAAAs:   ipfsGatewayAAAAs,
 		}
 	})
 
 	return nil
 }
 
-func ensParse(c *caddy.Controller) (string, string, []string, []string, error) {
+func ensParse(c *caddy.Controller) (string, []string, []string, []string, error) {
 	var connection string
-	var ethLinkRoot string
+	ethLinkNameServers := make([]string, 0)
 	ipfsGatewayAs := make([]string, 0)
 	ipfsGatewayAAAAs := make([]string, 0)
 
@@ -62,44 +61,47 @@ func ensParse(c *caddy.Controller) (string, string, []string, []string, error) {
 		case "connection":
 			args := c.RemainingArgs()
 			if len(args) == 0 {
-				return "", "", nil, nil, c.Errf("invalid connection; no value")
+				return "", nil, nil, nil, c.Errf("invalid connection; no value")
 			}
 			if len(args) > 1 {
-				return "", "", nil, nil, c.Errf("invalid connection; multiple values")
+				return "", nil, nil, nil, c.Errf("invalid connection; multiple values")
 			}
 			connection = args[0]
-		case "ethlinkroot":
+		case "ethlinknameservers":
 			args := c.RemainingArgs()
 			if len(args) == 0 {
-				return "", "", nil, nil, c.Errf("invalid ethlinkroot; no value")
+				return "", nil, nil, nil, c.Errf("invalid ethlinknameservers; no value")
 			}
-			if len(args) > 1 {
-				return "", "", nil, nil, c.Errf("invalid ethlinkroot; multiple values")
-			}
-			ethLinkRoot = args[0]
-			if !strings.HasSuffix(ethLinkRoot, ".") {
-				ethLinkRoot = fmt.Sprintf("%s.", ethLinkRoot)
-			}
+			ethLinkNameServers = make([]string, len(args))
+			copy(ethLinkNameServers, args)
 		case "ipfsgatewaya":
 			args := c.RemainingArgs()
 			if len(args) == 0 {
-				return "", "", nil, nil, c.Errf("invalid IPFS gateway A; no value")
+				return "", nil, nil, nil, c.Errf("invalid IPFS gateway A; no value")
 			}
 			ipfsGatewayAs = make([]string, len(args))
 			copy(ipfsGatewayAs, args)
 		case "ipfsgatewayaaaa":
 			args := c.RemainingArgs()
 			if len(args) == 0 {
-				return "", "", nil, nil, c.Errf("invalid IPFS gateway AAAA; no value")
+				return "", nil, nil, nil, c.Errf("invalid IPFS gateway AAAA; no value")
 			}
 			ipfsGatewayAAAAs = make([]string, len(args))
 			copy(ipfsGatewayAAAAs, args)
 		default:
-			return "", "", nil, nil, c.Errf("unknown value %v", c.Val())
+			return "", nil, nil, nil, c.Errf("unknown value %v", c.Val())
 		}
 	}
 	if connection == "" {
-		return "", "", nil, nil, c.Errf("no connection")
+		return "", nil, nil, nil, c.Errf("no connection")
 	}
-	return connection, ethLinkRoot, ipfsGatewayAs, ipfsGatewayAAAAs, nil
+	if len(ethLinkNameServers) == 0 {
+		return "", nil, nil, nil, c.Errf("no ethlinknameservers")
+	}
+	for i := range ethLinkNameServers {
+		if !strings.HasSuffix(ethLinkNameServers[i], ".") {
+			ethLinkNameServers[i] = ethLinkNameServers[i] + "."
+		}
+	}
+	return connection, ethLinkNameServers, ipfsGatewayAs, ipfsGatewayAAAAs, nil
 }

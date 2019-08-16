@@ -14,7 +14,8 @@ git checkout v1.6.1
 
 echo "Patching plugin config..."
 ed plugin.cfg <<EOED
-21a
+/rewrite:rewrite
+a
 ens:github.com/wealdtech/coredns-ens
 .
 w
@@ -38,6 +39,11 @@ github.com/wealdtech/coredns-ens v1.1.0
 w
 q
 EOED
+cat >>go.mod <<EOCAT
+replace k8s.io/api => k8s.io/api kubernetes-1.14.1
+replace k8s.io/apimachinery => k8s.io/apimachinery kubernetes-1.14.1
+replace k8s.io/client-go => k8s.io/client-go kubernetes-1.14.1
+EOCAT
 
 echo "Building..."
 make SHELL='sh -x' CGO_ENABLED=1 coredns
