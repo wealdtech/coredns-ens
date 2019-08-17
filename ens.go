@@ -4,6 +4,7 @@ package ens
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/coredns/coredns/plugin"
 	"github.com/coredns/coredns/request"
 	"github.com/ethereum/go-ethereum/ethclient"
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/labstack/gommon/log"
 	ens "github.com/wealdtech/go-ens/v3"
 
@@ -31,12 +33,7 @@ type ENS struct {
 
 // IsAuthoritative checks if the ENS plugin is authoritative for a given domain
 func (e ENS) IsAuthoritative(domain string) bool {
-	registry, err := ens.NewRegistry(e.Client)
-	if err != nil {
-		return false
-	}
-
-	controllerAddress, err := registry.Owner(strings.TrimSuffix(domain, "."))
+	controllerAddress, err := e.Registry.Owner(strings.TrimSuffix(domain, "."))
 	if err != nil {
 		return false
 	}
@@ -47,7 +44,7 @@ func (e ENS) IsAuthoritative(domain string) bool {
 // HasRecords checks if there are any records for a specific domain and name.
 // This is used for wildcard eligibility
 func (e ENS) HasRecords(domain string, name string) (bool, error) {
-	resolver, err := ens.NewDNSResolver(e.Client, strings.TrimSuffix(domain, "."))
+	resolver, err := e.getDNSResolver(strings.TrimSuffix(domain, "."))
 	if err != nil {
 		return false, err
 	}
@@ -88,13 +85,8 @@ func (e ENS) Query(domain string, name string, qtype uint16, do bool) ([]dns.RR,
 		}
 	} else {
 		ethDomain := strings.TrimSuffix(domain, ".")
-		resolver, err := ens.NewDNSResolver(e.Client, ethDomain)
+		resolver, err := e.getDNSResolver(ethDomain)
 		if err != nil {
-			if !strings.Contains(err.Error(), "is not a DNS resolver contract") {
-				log.Warnf("error obtaining DNS resolver for %v: %v", ethDomain, err)
-				return results, err
-			}
-			// No DNS resolver is fine; just return no results
 			return results, nil
 		}
 
@@ -162,7 +154,7 @@ func (e ENS) handleTXT(name string, domain string, contentHash []byte) ([]dns.RR
 
 	if isRealOnChainDomain(name, domain) {
 		ethDomain := strings.TrimSuffix(domain, ".")
-		resolver, err := ens.NewResolver(e.Client, ethDomain)
+		resolver, err := e.getResolver(ethDomain)
 		if err != nil {
 			log.Warnf("error obtaining resolver for %s: %v", ethDomain, err)
 			return results, nil
@@ -183,24 +175,24 @@ func (e ENS) handleTXT(name string, domain string, contentHash []byte) ([]dns.RR
 			}
 			results = append(results, result)
 		}
-	}
 
-	result, err := dns.NewRR(fmt.Sprintf("%s 3600 IN TXT \"contenthash=0x%x\"", name, contentHash))
-	if err != nil {
-		return results, err
-	}
-	results = append(results, result)
+		result, err := dns.NewRR(fmt.Sprintf("%s 3600 IN TXT \"contenthash=0x%x\"", name, contentHash))
+		if err != nil {
+			return results, err
+		}
+		results = append(results, result)
 
-	// Also provide dnslink for compatibility with older IPFS gateways
-	contentHashStr, err := ens.ContenthashToString(contentHash)
-	if err != nil {
-		return results, err
+		// Also provide dnslink for compatibility with older IPFS gateways
+		contentHashStr, err := ens.ContenthashToString(contentHash)
+		if err != nil {
+			return results, err
+		}
+		result, err = dns.NewRR(fmt.Sprintf("%s 3600 IN TXT \"dnslink=%s\"", name, contentHashStr))
+		if err != nil {
+			return results, nil
+		}
+		results = append(results, result)
 	}
-	result, err = dns.NewRR(fmt.Sprintf("%s 3600 IN TXT \"dnslink=%s\"", name, contentHashStr))
-	if err != nil {
-		return results, nil
-	}
-	results = append(results, result)
 
 	return results, nil
 }
@@ -294,14 +286,9 @@ func (e ENS) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (in
 
 func (e ENS) obtainARRSet(name string, domain string) ([]byte, error) {
 	ethDomain := strings.TrimSuffix(domain, ".")
-	resolver, err := ens.NewDNSResolver(e.Client, ethDomain)
+	resolver, err := e.getDNSResolver(ethDomain)
 	if err != nil {
-		if err.Error() == "no contract code at given address" ||
-			strings.HasSuffix(err.Error(), " is not a DNS resolver contract") {
-			return []byte{}, nil
-		}
-		log.Warnf("error obtaining resolver for %s: %v", ethDomain, err)
-		return []byte{}, err
+		return []byte{}, nil
 	}
 
 	return resolver.Record(name, dns.TypeA)
@@ -309,14 +296,9 @@ func (e ENS) obtainARRSet(name string, domain string) ([]byte, error) {
 
 func (e ENS) obtainAAAARRSet(name string, domain string) ([]byte, error) {
 	ethDomain := strings.TrimSuffix(domain, ".")
-	resolver, err := ens.NewDNSResolver(e.Client, ethDomain)
+	resolver, err := e.getDNSResolver(ethDomain)
 	if err != nil {
-		if err.Error() == "no contract code at given address" ||
-			strings.HasSuffix(err.Error(), " is not a DNS resolver contract") {
-			return []byte{}, nil
-		}
-		log.Warnf("error obtaining resolver for %s: %v", ethDomain, err)
-		return []byte{}, err
+		return []byte{}, nil
 	}
 
 	return resolver.Record(name, dns.TypeAAAA)
@@ -324,14 +306,9 @@ func (e ENS) obtainAAAARRSet(name string, domain string) ([]byte, error) {
 
 func (e ENS) obtainContentHash(name string, domain string) ([]byte, error) {
 	ethDomain := strings.TrimSuffix(domain, ".")
-	resolver, err := ens.NewResolver(e.Client, ethDomain)
+	resolver, err := e.getResolver(ethDomain)
 	if err != nil {
-		if err.Error() == "no contract code at given address" ||
-			strings.HasSuffix(err.Error(), " is not a DNS resolver contract") {
-			return []byte{}, nil
-		}
-		log.Warnf("error obtaining resolver for %s: %v", ethDomain, err)
-		return []byte{}, err
+		return []byte{}, nil
 	}
 
 	return resolver.Contenthash()
@@ -339,14 +316,9 @@ func (e ENS) obtainContentHash(name string, domain string) ([]byte, error) {
 
 func (e ENS) obtainTXTRRSet(name string, domain string) ([]byte, error) {
 	ethDomain := strings.TrimSuffix(domain, ".")
-	resolver, err := ens.NewDNSResolver(e.Client, ethDomain)
+	resolver, err := e.getDNSResolver(ethDomain)
 	if err != nil {
-		if err.Error() == "no contract code at given address" ||
-			strings.HasSuffix(err.Error(), " is not a DNS resolver contract") {
-			return []byte{}, nil
-		}
-		log.Warnf("error obtaining resolver for %s: %v", ethDomain, err)
-		return []byte{}, err
+		return []byte{}, nil
 	}
 
 	return resolver.Record(name, dns.TypeTXT)
@@ -360,4 +332,50 @@ func (e ENS) Name() string { return "ens" }
 // presence
 func isRealOnChainDomain(name string, domain string) bool {
 	return name == domain
+}
+
+var resolverCache *lru.Cache
+var dnsResolverCache *lru.Cache
+
+func init() {
+	resolverCache, _ = lru.New(16)
+	dnsResolverCache, _ = lru.New(16)
+}
+
+func (e *ENS) getDNSResolver(domain string) (*ens.DNSResolver, error) {
+	if !dnsResolverCache.Contains(domain) {
+		resolver, err := ens.NewDNSResolver(e.Client, domain)
+		if err == nil {
+			dnsResolverCache.Add(domain, resolver)
+		} else {
+			if err.Error() == "no contract code at given address" ||
+				strings.HasSuffix(err.Error(), " is not a DNS resolver contract") {
+				dnsResolverCache.Add(domain, nil)
+			}
+		}
+	}
+	resolver, _ := dnsResolverCache.Get(domain)
+	if resolver == nil {
+		return nil, errors.New("no resolver")
+	}
+	return resolver.(*ens.DNSResolver), nil
+}
+
+func (e *ENS) getResolver(domain string) (*ens.Resolver, error) {
+	if !resolverCache.Contains(domain) {
+		resolver, err := ens.NewResolver(e.Client, domain)
+		if err == nil {
+			resolverCache.Add(domain, resolver)
+		} else {
+			if err.Error() == "no contract code at given address" ||
+				strings.HasSuffix(err.Error(), " is not a resolver contract") {
+				resolverCache.Add(domain, nil)
+			}
+		}
+	}
+	resolver, _ := resolverCache.Get(domain)
+	if resolver == nil {
+		return nil, errors.New("no resolver")
+	}
+	return resolver.(*ens.Resolver), nil
 }
