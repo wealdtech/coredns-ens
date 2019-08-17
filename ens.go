@@ -361,9 +361,18 @@ func (e *ENS) getDNSResolver(domain string) (*ens.DNSResolver, error) {
 	return resolver.(*ens.DNSResolver), nil
 }
 
+func (e *ENS) newDNSResolver(domain string) (*ens.DNSResolver, error) {
+	// Obtain the resolver address for this domain
+	resolver, err := e.Registry.ResolverAddress(domain)
+	if err != nil {
+		return nil, err
+	}
+	return ens.NewDNSResolverAt(e.Client, domain, resolver)
+}
+
 func (e *ENS) getResolver(domain string) (*ens.Resolver, error) {
 	if !resolverCache.Contains(domain) {
-		resolver, err := ens.NewResolver(e.Client, domain)
+		resolver, err := e.newResolver(domain)
 		if err == nil {
 			resolverCache.Add(domain, resolver)
 		} else {
@@ -378,4 +387,13 @@ func (e *ENS) getResolver(domain string) (*ens.Resolver, error) {
 		return nil, errors.New("no resolver")
 	}
 	return resolver.(*ens.Resolver), nil
+}
+
+func (e *ENS) newResolver(domain string) (*ens.Resolver, error) {
+	// Obtain the resolver address for this domain
+	resolver, err := e.Registry.ResolverAddress(domain)
+	if err != nil {
+		return nil, err
+	}
+	return ens.NewResolverAt(e.Client, domain, resolver)
 }
