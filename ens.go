@@ -397,3 +397,12 @@ func (e *ENS) newResolver(domain string) (*ens.Resolver, error) {
 	}
 	return ens.NewResolverAt(e.Client, domain, resolver)
 }
+
+// Ready returns true if we're ready to serve DNS records i.e. our chain is synced
+func (e ENS) Ready() bool {
+	progress, err := e.Client.SyncProgress(context.Background())
+	if err != nil {
+		return false
+	}
+	return progress == nil
+}
