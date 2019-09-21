@@ -11,17 +11,7 @@ The second feature provides a mechanism to map DNS domains to ENS domains by rem
 
 # Building
 
-As coredns-ens is a CoreDNS plugin it requires integration in to the CoreDNS source code and a rebuild of the CoreDNS binary.  If a manual installation is required, for example if the platform on which this is being built is not supported by the script or the user wants to use multiple plugins, details can be found at https://coredns.io/2017/07/25/compile-time-enabling-or-disabling-plugins/
-
-There is a build script that generates the `coredns` binary with the ENS plugin.  It should work on most unix-like systems and can be run with:
-
-    ./build.sh
-
-If a Docker image is required as well this can be carried out by the build process by adding a group parameter to the build script, for example:
-
-    ./build.sh wealdtech
-
-would build the docker image `wealdtech/coredns`.
+The latest build is always available as a docker repository at `wealdtech/coredns-ens`.  If you want to build a standalone copy of CoreDNS with this plugin enabled run the `build-standalone.sh` script, which should work on most unix-like systems.
 
 # Corefile
 
