@@ -163,8 +163,8 @@ func Lookup(server Server, state request.Request) ([]dns.RR, []dns.RR, []dns.RR,
 					}
 					additionalRrs = append(additionalRrs, additionalRr)
 				}
+				return answerRrs, authorityRrs, additionalRrs, wildcardResult
 			}
-			return answerRrs, authorityRrs, additionalRrs, wildcardResult
 		}
 	}
 

@@ -34,7 +34,7 @@ replace github.com/wealdtech/coredns-ens => ../..
 k8s.io/api kubernetes-1.14.1
 k8s.io/apimachinery kubernetes-1.14.1
 k8s.io/client-go kubernetes-1.14.1
-github.com/wealdtech/coredns-ens v1.1.0
+github.com/wealdtech/coredns-ens v1.2.0
 .
 w
 q
