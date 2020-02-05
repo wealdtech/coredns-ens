@@ -44,12 +44,22 @@ func (e ENS) IsAuthoritative(domain string) bool {
 // HasRecords checks if there are any records for a specific domain and name.
 // This is used for wildcard eligibility
 func (e ENS) HasRecords(domain string, name string) (bool, error) {
-	resolver, err := e.getDNSResolver(strings.TrimSuffix(domain, "."))
+	// See if this has a contenthash record.
+	resolver, err := e.getResolver(domain)
 	if err != nil {
 		return false, err
 	}
+	bytes, err := resolver.Contenthash()
+	if err == nil && len(bytes) > 0 {
+		return true, err
+	}
 
-	return resolver.HasRecords(name)
+	// See if this has DNS records.
+	dnsResolver, err := e.getDNSResolver(strings.TrimSuffix(domain, "."))
+	if err != nil {
+		return false, err
+	}
+	return dnsResolver.HasRecords(name)
 }
 
 // Query queries a given domain/name/resource combination
