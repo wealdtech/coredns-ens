@@ -73,6 +73,6 @@ Running CoreDNS standalone is simply a case of starting the binary.  See the Cor
 
 Running CoreDNS with Docker requires running the image created in the `Building` section.  A sample command-line might be:
 
-    docker run -p 53:53/udp --volume=/home/coredns:/etc/coredns wealdtech/coredns:latest
+    docker run -p 53:53/udp --volume=/home/coredns:/etc/coredns wealdtech/coredns-ens:latest
 
 where `/home/coredns` is the directory on the server that contains the Corefile and certificates.
