@@ -202,6 +202,17 @@ func (e ENS) handleTXT(name string, domain string, contentHash []byte) ([]dns.RR
 			return results, nil
 		}
 		results = append(results, result)
+	} else if isRealOnChainDomain(strings.TrimPrefix(name, "_dnslink."), domain) {
+		// This is a request to _dnslink.<domain>, return the DNS link record.
+		contentHashStr, err := ens.ContenthashToString(contentHash)
+		if err != nil {
+			return results, err
+		}
+		result, err := dns.NewRR(fmt.Sprintf("%s 3600 IN TXT \"dnslink=%s\"", name, contentHashStr))
+		if err != nil {
+			return results, err
+		}
+		results = append(results, result)
 	}
 
 	return results, nil
