@@ -3,12 +3,11 @@ package ens
 import (
 	"strings"
 
+	"github.com/coredns/caddy"
 	"github.com/coredns/coredns/core/dnsserver"
 	"github.com/coredns/coredns/plugin"
 	"github.com/ethereum/go-ethereum/ethclient"
 	ens "github.com/wealdtech/go-ens/v3"
-
-	"github.com/caddyserver/caddy"
 )
 
 func init() {
