@@ -38,6 +38,7 @@ q
 EOED
 
 go get github.com/wealdtech/coredns-ens@v1.3.1
+go get
 go mod download
 
 echo "Building..."
